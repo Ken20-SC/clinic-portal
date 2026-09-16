@@ -890,7 +890,7 @@ export default function ClinicApp() {
                         disabled={isStaff}
                         value={studentInfo.surname}
                         onChange={e => setStudentInfo({...studentInfo, surname: e.target.value})}
-                        placeholder="e.g. Bicierro"
+                        placeholder="e.g. Dela Cruz"
                         className="border-b border-dotted border-slate-400 focus:border-slate-800 outline-none px-1 text-slate-700 bg-transparent min-w-[120px]"
                       />
 
@@ -899,7 +899,7 @@ export default function ClinicApp() {
                         disabled={isStaff}
                         value={studentInfo.first_name}
                         onChange={e => setStudentInfo({...studentInfo, first_name: e.target.value})}
-                        placeholder="e.g. Sofia Clarice"
+                        placeholder="e.g. Juan"
                         className="border-b border-dotted border-slate-400 focus:border-slate-800 outline-none px-1 text-slate-700 bg-transparent min-w-[140px]"
                       />
 
@@ -920,7 +920,7 @@ export default function ClinicApp() {
                         type="text"
                         value={studentInfo.dob}
                         onChange={e => setStudentInfo({...studentInfo, dob: e.target.value})}
-                        placeholder="e.g. September 29, 2004"
+                        placeholder="e.g. mm/dd/yyyy"
                         className="border-b border-dotted border-slate-400 focus:border-slate-800 outline-none px-1 text-slate-700 bg-transparent min-w-[160px]"
                       />
 
@@ -938,7 +938,7 @@ export default function ClinicApp() {
                         disabled={isStaff}
                         value={studentInfo.program_year_level}
                         onChange={e => setStudentInfo({...studentInfo, program_year_level: e.target.value})}
-                        placeholder="BS Nursing 4th Year"
+                        placeholder="BS Nursing 3rd Year"
                         className="border-b border-dotted border-slate-400 focus:border-slate-800 outline-none px-1 text-slate-700 bg-transparent flex-1 min-w-[160px]"
                       />
                     </div>
@@ -960,7 +960,7 @@ export default function ClinicApp() {
                         disabled={isStaff}
                         value={studentInfo.contact_number}
                         onChange={e => setStudentInfo({...studentInfo, contact_number: e.target.value})}
-                        placeholder="+63 915 415 1745"
+                        placeholder="+63 912 345 6789"
                         className="border-b border-dotted border-slate-400 focus:border-slate-800 outline-none px-1 text-slate-700 bg-transparent min-w-[140px]"
                       />
 
@@ -995,7 +995,7 @@ export default function ClinicApp() {
                             disabled={isStaff}
                             value={studentInfo.emergency_name}
                             onChange={e => setStudentInfo({...studentInfo, emergency_name: e.target.value})}
-                            placeholder="Ma. Klarisa B. Cagahastian"
+                            placeholder="Juan Dela Cruz"
                             className="border-b border-dotted border-slate-400 focus:border-slate-800 outline-none px-1 text-slate-700 bg-transparent flex-1"
                           />
                         </div>
@@ -1006,7 +1006,7 @@ export default function ClinicApp() {
                             disabled={isStaff}
                             value={studentInfo.emergency_contact}
                             onChange={e => setStudentInfo({...studentInfo, emergency_contact: e.target.value})}
-                            placeholder="+63 915 415 1745"
+                            placeholder="+63 912 345 6789"
                             className="border-b border-dotted border-slate-400 focus:border-slate-800 outline-none px-1 text-slate-700 bg-transparent min-w-[140px]"
                           />
 
@@ -1015,7 +1015,7 @@ export default function ClinicApp() {
                             disabled={isStaff}
                             value={studentInfo.emergency_email}
                             onChange={e => setStudentInfo({...studentInfo, emergency_email: e.target.value})}
-                            placeholder="sofiaclaricebcagahastian@tua.edu.ph"
+                            placeholder="juan.dela.cruz@edu.ph"
                             className="border-b border-dotted border-slate-400 focus:border-slate-800 outline-none px-1 text-slate-700 bg-transparent flex-1"
                           />
                         </div>
@@ -1056,7 +1056,7 @@ export default function ClinicApp() {
                             disabled={isStaff}
                             value={studentInfo.family_history}
                             onChange={e => setStudentInfo({...studentInfo, family_history: e.target.value})}
-                            placeholder="Asthma (Maternal), Hypertension (Paternal)"
+                            placeholder="Asthma, Diabetes"
                             className="border-b border-dotted border-slate-400 focus:border-slate-800 outline-none px-1 text-slate-700 bg-transparent flex-1"
                           />
                         </div>
