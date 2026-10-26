@@ -18,13 +18,12 @@ export default function ClinicApp() {
   const [loading, setLoading] = useState(true);
 
   // Auth State
-  const [isRegistering, setIsRegistering] = useState(false);
+  const [authView, setAuthView] = useState('login'); // 'login', 'register', 'forgot'
   const [authEmail, setAuthEmail] = useState('');
   const [authPassword, setAuthPassword] = useState('');
-  const [registerRole, setRegisterRole] = useState('student');
   const [authMessage, setAuthMessage] = useState('');
 
-  // Top Global Header Navigation (HOME, DATABASE, SCHEDULING)
+  // Top Global Header Navigation
   const [mainPage, setMainPage] = useState('home');
 
   // Student Database Ribbon Tabs
@@ -33,19 +32,25 @@ export default function ClinicApp() {
   // Annual Physical Assessment Sub-Tabs
   const [assessmentSubTab, setAssessmentSubTab] = useState('lab_results');
 
-  // Staff Patient Selector State
+  // Staff Patient Search & Selector State
   const [allStudents, setAllStudents] = useState([]);
+  const [studentSearchTerm, setStudentSearchTerm] = useState('');
   const [selectedStudentId, setSelectedStudentId] = useState('');
 
   // Scheduling Workflow States
   const [appointmentType, setAppointmentType] = useState('Consultation');
   const [specialization, setSpecialization] = useState('General Medicine');
   const [procedureType, setProcedureType] = useState('Dental Cleaning');
-  const [scheduleStep, setScheduleStep] = useState('select');
+  const [scheduleStep, setScheduleStep] = useState('select'); // 'select', 'datetime', 'verify'
   const [appointmentDate, setAppointmentDate] = useState(new Date().toISOString().split('T')[0]);
   const [appointmentTime, setAppointmentTime] = useState('09:00 AM');
   const [showAppointmentsModal, setShowAppointmentsModal] = useState(false);
   const [appointments, setAppointments] = useState([]);
+
+  // Doctor reschedule modal state
+  const [reschedulingAppt, setReschedulingAppt] = useState(null);
+  const [newRescheduleDate, setNewRescheduleDate] = useState('');
+  const [newRescheduleTime, setNewRescheduleTime] = useState('09:00 AM');
 
   // Student Record States
   const [studentInfo, setStudentInfo] = useState({
@@ -72,10 +77,6 @@ export default function ClinicApp() {
   });
 
   const [assessment, setAssessment] = useState({
-    blood_pressure: '',
-    heart_rate: '',
-    respiratory_rate: '',
-    oxygen_saturation: '',
     med_cert_url: '',
     med_cert_name: '',
     chest_xray_url: '',
@@ -92,6 +93,17 @@ export default function ClinicApp() {
     anti_hbs_name: '',
     serum_pregnancy_url: '',
     serum_pregnancy_name: '',
+  });
+
+  // Multiple Historical Vitals State
+  const [vitalsList, setVitalsList] = useState([]);
+  const [showNewVitalsForm, setShowNewVitalsForm] = useState(false);
+  const [newVital, setNewVital] = useState({
+    date_recorded: new Date().toISOString().split('T')[0],
+    blood_pressure: '',
+    heart_rate: '',
+    respiratory_rate: '',
+    oxygen_saturation: '',
   });
 
   const [consultations, setConsultations] = useState([]);
@@ -147,7 +159,9 @@ export default function ClinicApp() {
   };
 
   const fetchAllStudentsList = async () => {
-    const { data } = await supabase.from('students').select('id, full_name, surname, first_name, email, program_year_level');
+    const { data } = await supabase
+      .from('students')
+      .select('id, full_name, surname, first_name, email, program_year_level');
     if (data && data.length > 0) {
       setAllStudents(data);
       setSelectedStudentId(data[0].id);
@@ -201,34 +215,18 @@ export default function ClinicApp() {
 
       if (assess) {
         setAssessment(prev => ({ ...prev, ...assess }));
-      } else {
-        const defaultAssess = {
-          student_id: targetId,
-          blood_pressure: '',
-          heart_rate: '',
-          respiratory_rate: '',
-          oxygen_saturation: '',
-          med_cert_url: '',
-          med_cert_name: '',
-          chest_xray_url: '',
-          chest_xray_name: '',
-          cbc_url: '',
-          cbc_name: '',
-          urinalysis_url: '',
-          urinalysis_name: '',
-          fecalysis_url: '',
-          fecalysis_name: '',
-          hbsag_url: '',
-          hbsag_name: '',
-          anti_hbs_url: '',
-          anti_hbs_name: '',
-          serum_pregnancy_url: '',
-          serum_pregnancy_name: '',
-        };
-        await supabase.from('physical_assessments').insert([defaultAssess]);
-        setAssessment(defaultAssess);
       }
 
+      // Load Historical Vital Signs
+      const { data: vitals } = await supabase
+        .from('vital_sign_records')
+        .select('*')
+        .eq('student_id', targetId)
+        .order('date_recorded', { ascending: false });
+
+      setVitalsList(vitals || []);
+
+      // Load Consultations
       const { data: consults } = await supabase
         .from('consultations')
         .select('*')
@@ -254,9 +252,21 @@ export default function ClinicApp() {
 
     const formattedEmail = authEmail.includes('@')
       ? authEmail.trim()
-      : `${authEmail.trim().replace(/\s+/g, '')}@student.tua.edu.ph`;
+      : `${authEmail.trim().replace(/\s+/g, '')}@student.university.edu`;
 
-    if (isRegistering) {
+    if (authView === 'forgot') {
+      const { error } = await supabase.auth.resetPasswordForEmail(formattedEmail);
+      setLoading(false);
+      if (error) {
+        setAuthMessage(error.message);
+      } else {
+        setAuthMessage('Password reset link has been sent to your email.');
+      }
+      return;
+    }
+
+    if (authView === 'register') {
+      // Direct student registration only
       const { data, error } = await supabase.auth.signUp({
         email: formattedEmail,
         password: authPassword,
@@ -267,11 +277,9 @@ export default function ClinicApp() {
         return;
       }
       if (data?.user) {
-        await supabase.from('profiles').insert([{ id: data.user.id, email: formattedEmail, role: registerRole }]);
-        if (registerRole === 'student') {
-          await supabase.from('students').insert([{ id: data.user.id, email: formattedEmail, full_name: authEmail }]);
-          await supabase.from('physical_assessments').insert([{ student_id: data.user.id }]);
-        }
+        await supabase.from('profiles').insert([{ id: data.user.id, email: formattedEmail, role: 'student' }]);
+        await supabase.from('students').insert([{ id: data.user.id, email: formattedEmail, full_name: authEmail }]);
+        await supabase.from('physical_assessments').insert([{ student_id: data.user.id }]);
         await loadUserProfile(data.user);
       }
     } else {
@@ -313,10 +321,7 @@ export default function ClinicApp() {
         .from('clinic-docs')
         .upload(storagePath, file, { upsert: true });
 
-      if (uploadError) {
-        console.error('Upload Error:', uploadError);
-        return alert('Storage upload failed: ' + uploadError.message);
-      }
+      if (uploadError) throw uploadError;
 
       const { data: urlData } = supabase.storage
         .from('clinic-docs')
@@ -330,34 +335,16 @@ export default function ClinicApp() {
           [fieldKey]: publicUrl,
           updated_at: new Date().toISOString()
         };
-
-        const { error: dbError } = await supabase
-          .from('students')
-          .upsert(updatePayload, { onConflict: 'id' });
-
-        if (dbError) throw dbError;
+        await supabase.from('students').upsert(updatePayload, { onConflict: 'id' });
         setStudentInfo(prev => ({ ...prev, [fieldKey]: publicUrl }));
       } else {
         const updatePayload = {
           student_id: selectedStudentId,
           [fieldKey]: publicUrl,
-          updated_at: new Date().toISOString()
+          updated_at: new Date().toISOString(),
+          ...(fileNameKey ? { [fileNameKey]: exactOriginalFileName } : {})
         };
-
-        if (fileNameKey) {
-          updatePayload[fileNameKey] = exactOriginalFileName;
-        }
-
-        const { error: dbError } = await supabase
-          .from('physical_assessments')
-          .upsert(updatePayload, { onConflict: 'student_id' });
-
-        if (dbError) {
-          await supabase
-            .from('physical_assessments')
-            .upsert({ student_id: selectedStudentId, [fieldKey]: publicUrl }, { onConflict: 'student_id' });
-        }
-
+        await supabase.from('physical_assessments').upsert(updatePayload, { onConflict: 'student_id' });
         setAssessment(prev => ({
           ...prev,
           [fieldKey]: publicUrl,
@@ -365,10 +352,9 @@ export default function ClinicApp() {
         }));
       }
 
-      alert('File uploaded and replaced successfully!');
+      alert('File uploaded successfully!');
     } catch (err) {
-      console.error('Database Save Error:', err);
-      alert('Database save failed: ' + err.message);
+      alert('Upload failed: ' + err.message);
     }
   };
 
@@ -391,20 +377,37 @@ export default function ClinicApp() {
     else alert('Student Information saved successfully!');
   };
 
-  const handleSaveVitals = async () => {
-    if (!selectedStudentId) return;
+  // Save New Vital Sign Record with Date
+  const handleSaveNewVitals = async () => {
+    if (!selectedStudentId) return alert('Select a student first.');
+    if (!newVital.date_recorded) return alert('Please specify a date.');
+
     setLoading(true);
-    const { error } = await supabase.from('physical_assessments').upsert(
-      {
-        student_id: selectedStudentId,
-        ...assessment,
-        updated_at: new Date().toISOString()
-      },
-      { onConflict: 'student_id' }
-    );
+    const { data, error } = await supabase.from('vital_sign_records').insert([{
+      student_id: selectedStudentId,
+      doctor_id: currentUser.id,
+      date_recorded: newVital.date_recorded,
+      blood_pressure: newVital.blood_pressure,
+      heart_rate: newVital.heart_rate,
+      respiratory_rate: newVital.respiratory_rate,
+      oxygen_saturation: newVital.oxygen_saturation,
+    }]).select();
+
     setLoading(false);
-    if (error) alert('Error updating vitals: ' + error.message);
-    else alert('Vitals updated successfully!');
+    if (error) {
+      alert('Error saving vital signs: ' + error.message);
+    } else {
+      alert('Vital Signs record added!');
+      setVitalsList(prev => [data[0], ...prev]);
+      setShowNewVitalsForm(false);
+      setNewVital({
+        date_recorded: new Date().toISOString().split('T')[0],
+        blood_pressure: '',
+        heart_rate: '',
+        respiratory_rate: '',
+        oxygen_saturation: '',
+      });
+    }
   };
 
   const handleSaveConsultation = async () => {
@@ -438,8 +441,7 @@ export default function ClinicApp() {
   };
 
   // Database-backed Appointment Booking
-  const handleFinalizeBooking = async (e) => {
-    e.preventDefault();
+  const handleFinalizeBooking = async () => {
     const detail = appointmentType === 'Consultation' ? specialization : procedureType;
     const currentName = studentInfo.surname 
       ? `${studentInfo.surname}, ${studentInfo.first_name}` 
@@ -469,13 +471,43 @@ export default function ClinicApp() {
       alert('Error booking appointment: ' + error.message);
     } else {
       setAppointments(prev => [...(data || [newRecord]), ...prev]);
-      alert(`Appointment Confirmed and Saved!\n${appointmentType}: ${detail}\nDate: ${appointmentDate} at ${appointmentTime}`);
+      alert(`Appointment Confirmed and Verified!\n${appointmentType}: ${detail}\nDate: ${appointmentDate} at ${appointmentTime}`);
       setScheduleStep('select');
       await fetchAppointments(currentUser.id, false);
     }
   };
 
-  // Update Status in Supabase
+  // Doctor reschedule confirmation
+  const handleConfirmReschedule = async () => {
+    if (!reschedulingAppt || !newRescheduleDate || !newRescheduleTime) return;
+
+    setLoading(true);
+    const { error } = await supabase
+      .from('appointments')
+      .update({
+        date: newRescheduleDate,
+        time: newRescheduleTime,
+        status: 'Confirmed',
+        rescheduled: true,
+      })
+      .eq('id', reschedulingAppt.id);
+
+    setLoading(false);
+    if (error) {
+      alert('Failed to reschedule: ' + error.message);
+    } else {
+      setAppointments(prev => prev.map(a => a.id === reschedulingAppt.id ? {
+        ...a,
+        date: newRescheduleDate,
+        time: newRescheduleTime,
+        status: 'Confirmed',
+        rescheduled: true
+      } : a));
+      alert('Appointment has been successfully moved to the new date and time.');
+      setReschedulingAppt(null);
+    }
+  };
+
   const handleUpdateStatus = async (id, newStatus) => {
     const { error } = await supabase
       .from('appointments')
@@ -489,7 +521,6 @@ export default function ClinicApp() {
     }
   };
 
-  // Delete/Cancel Appointment in Supabase
   const handleCancelAppointment = async (id) => {
     if (!confirm('Are you sure you want to cancel this appointment?')) return;
 
@@ -522,7 +553,24 @@ export default function ClinicApp() {
   const pendingLabs = LAB_KEYS.filter(lab => !assessment[lab.key]);
   const isStaff = userRole === 'doctor' || userRole === 'admin';
 
-  // LOGIN & REGISTER VIEW
+  // Filtered students for patient search
+  const filteredStudents = allStudents.filter(s => {
+    const q = studentSearchTerm.toLowerCase();
+    const fullName = (s.full_name || '').toLowerCase();
+    const surname = (s.surname || '').toLowerCase();
+    const firstName = (s.first_name || '').toLowerCase();
+    const email = (s.email || '').toLowerCase();
+    return fullName.includes(q) || surname.includes(q) || firstName.includes(q) || email.includes(q);
+  });
+
+  // Calculate available booking dates: Weekdays only, starting from tomorrow
+  const getMinBookingDate = () => {
+    const d = new Date();
+    d.setDate(d.getDate() + 1);
+    return d.toISOString().split('T')[0];
+  };
+
+  // ================= VIEW: LOGIN, REGISTER & FORGOT PASSWORD =================
   if (!currentUser) {
     return (
       <div 
@@ -534,49 +582,40 @@ export default function ClinicApp() {
         <div className="absolute inset-0 bg-black/25 backdrop-blur-[1px]" />
 
         <div className="relative z-10 w-full max-w-[340px] bg-[#fff6f4] border border-black px-7 py-10 shadow-2xl flex flex-col items-center">
-          <h1 className="text-4xl font-extrabold tracking-wider text-black uppercase mb-8 select-none">
-            {isRegistering ? 'REGISTER' : 'SIGN IN'}
+          <h1 className="text-3xl font-extrabold tracking-wider text-black uppercase mb-6 select-none text-center">
+            {authView === 'register' ? 'STUDENT REGISTER' : authView === 'forgot' ? 'RESET PASSWORD' : 'SIGN IN'}
           </h1>
 
           {authMessage && (
-            <div className="w-full bg-red-100 border border-red-300 text-red-700 text-xs p-2 rounded mb-4 text-center">
+            <div className={`w-full text-xs p-2.5 rounded mb-4 text-center border ${
+              authMessage.includes('sent') ? 'bg-emerald-100 border-emerald-300 text-emerald-800' : 'bg-red-100 border-red-300 text-red-700'
+            }`}>
               {authMessage}
             </div>
           )}
 
-          <form onSubmit={handleAuth} className="w-full flex flex-col items-center space-y-4">
+          <form onSubmit={handleAuth} className="w-full flex flex-col items-center space-y-3.5">
             <div className="w-full">
               <input
                 type="text"
                 required
                 value={authEmail}
                 onChange={e => setAuthEmail(e.target.value)}
-                placeholder="STUDENT ID NUMBER"
+                placeholder="STUDENT ID NUMBER / EMAIL"
                 className="w-full text-center text-xs font-semibold tracking-wider placeholder:text-gray-400 uppercase py-2.5 px-4 rounded-full border border-black bg-white focus:outline-none focus:ring-2 focus:ring-[#1b3824] transition shadow-xs"
               />
             </div>
 
-            <div className="w-full">
-              <input
-                type="password"
-                required
-                value={authPassword}
-                onChange={e => setAuthPassword(e.target.value)}
-                placeholder="PASSWORD"
-                className="w-full text-center text-xs font-semibold tracking-wider placeholder:text-gray-400 uppercase py-2.5 px-4 rounded-full border border-black bg-white focus:outline-none focus:ring-2 focus:ring-[#1b3824] transition shadow-xs"
-              />
-            </div>
-
-            {isRegistering && (
+            {authView !== 'forgot' && (
               <div className="w-full">
-                <select
-                  value={registerRole}
-                  onChange={e => setRegisterRole(e.target.value)}
-                  className="w-full text-center text-xs font-semibold py-2 px-3 rounded-full border border-black bg-white focus:outline-none"
-                >
-                  <option value="student">Student</option>
-                  <option value="doctor">Clinic Doctor / Admin</option>
-                </select>
+                <input
+                  type="password"
+                  required
+                  value={authPassword}
+                  onChange={e => setAuthPassword(e.target.value)}
+                  placeholder="PASSWORD"
+                  className="w-full text-center text-xs font-semibold tracking-wider placeholder:text-gray-400 uppercase py-2.5 px-4 rounded-full border border-black bg-white focus:outline-none focus:ring-2 focus:ring-[#1b3824] transition shadow-xs"
+                />
               </div>
             )}
 
@@ -586,32 +625,58 @@ export default function ClinicApp() {
                 disabled={loading}
                 className="w-full bg-[#1b3824] hover:bg-[#14291a] active:scale-[0.98] text-white font-bold tracking-widest text-xs py-2.5 rounded-lg uppercase shadow-md transition-all"
               >
-                {loading ? 'PLEASE WAIT...' : (isRegistering ? 'REGISTER' : 'LOGIN')}
+                {loading ? 'PLEASE WAIT...' : authView === 'register' ? 'REGISTER' : authView === 'forgot' ? 'SEND RESET LINK' : 'LOGIN'}
               </button>
             </div>
           </form>
 
-          <div className="mt-6 text-center text-[11px] text-gray-700">
-            {isRegistering ? (
+          <div className="mt-6 text-center text-[11px] text-gray-700 space-y-2">
+            {authView === 'login' && (
+              <>
+                <p>
+                  <button
+                    type="button"
+                    onClick={() => { setAuthView('forgot'); setAuthMessage(''); }}
+                    className="font-bold underline text-amber-900 hover:text-black"
+                  >
+                    Forgot your password?
+                  </button>
+                </p>
+                <p>
+                  New student?{' '}
+                  <button
+                    type="button"
+                    onClick={() => { setAuthView('register'); setAuthMessage(''); }}
+                    className="font-bold underline hover:text-black"
+                  >
+                    Register Student Account
+                  </button>
+                </p>
+              </>
+            )}
+
+            {authView === 'register' && (
               <p>
-                Have an account?{' '}
+                Have an account already?{' '}
                 <button
                   type="button"
-                  onClick={() => { setIsRegistering(false); setAuthMessage(''); }}
+                  onClick={() => { setAuthView('login'); setAuthMessage(''); }}
                   className="font-bold underline hover:text-black"
                 >
                   Sign In
                 </button>
               </p>
-            ) : (
+            )}
+
+            {authView === 'forgot' && (
               <p>
-                New user?{' '}
+                Remember your password?{' '}
                 <button
                   type="button"
-                  onClick={() => { setIsRegistering(true); setAuthMessage(''); }}
+                  onClick={() => { setAuthView('login'); setAuthMessage(''); }}
                   className="font-bold underline hover:text-black"
                 >
-                  Register Account
+                  Back to Login
                 </button>
               </p>
             )}
@@ -627,7 +692,6 @@ export default function ClinicApp() {
         
         {/* TOP GLOBAL SAGE-GREEN TITLE & NAVIGATION BANNER */}
         <div className="bg-[#a3ba91] px-6 py-4 flex flex-wrap items-center justify-between border-b border-[#8da57b] gap-4">
-          
           <div className="flex items-center space-x-8">
             <button
               onClick={() => setMainPage('home')}
@@ -657,24 +721,7 @@ export default function ClinicApp() {
             </button>
           </div>
 
-          <div className="flex items-center space-x-4 text-[#1c3822]">
-            {isStaff && mainPage === 'database' && (
-              <div className="flex items-center space-x-2 mr-2">
-                <span className="text-xs font-bold uppercase">Patient:</span>
-                <select
-                  value={selectedStudentId}
-                  onChange={e => handleSelectStudent(e.target.value)}
-                  className="text-xs font-semibold py-1 px-2 border border-[#1c3822] bg-white rounded"
-                >
-                  {allStudents.map(s => (
-                    <option key={s.id} value={s.id}>
-                      {s.surname ? `${s.surname}, ${s.first_name}` : (s.full_name || s.email)}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            )}
-
+          <div className="flex items-center space-x-3 text-[#1c3822]">
             <button 
               title="Previous Page" 
               onClick={() => {
@@ -745,9 +792,9 @@ export default function ClinicApp() {
                     Annual Physical Exam Schedule
                   </h3>
                   <div className="pl-6 pt-1 space-y-1 text-sm font-medium text-slate-700">
-                    <p>St. Luke’s College of Nursing</p>
+                    <p>College of Nursing</p>
                     <p>College of Medical Technology</p>
-                    <p>College of Allied Health and Sciences</p>
+                    <p>College of Allied Health Sciences</p>
                   </div>
                 </div>
               </div>
@@ -798,6 +845,41 @@ export default function ClinicApp() {
         {/* ================= VIEW 2: STUDENT DATABASE ================= */}
         {mainPage === 'database' && (
           <div>
+            {/* Staff Patient Search Bar */}
+            {isStaff && (
+              <div className="bg-slate-100 p-4 border-b border-slate-300 flex flex-wrap items-center justify-between gap-4">
+                <div className="flex items-center gap-2 flex-1 max-w-md">
+                  <span className="text-xs font-bold uppercase text-[#1c3822]">🔍 Search Patient:</span>
+                  <input
+                    type="text"
+                    value={studentSearchTerm}
+                    onChange={e => setStudentSearchTerm(e.target.value)}
+                    placeholder="Search by student name or email..."
+                    className="flex-1 text-xs border border-slate-300 bg-white px-3 py-1.5 rounded focus:outline-none focus:ring-1 focus:ring-[#1c3822]"
+                  />
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-bold uppercase text-slate-700">Selected:</span>
+                  <select
+                    value={selectedStudentId}
+                    onChange={e => handleSelectStudent(e.target.value)}
+                    className="text-xs font-semibold py-1.5 px-3 border border-[#1c3822] bg-white rounded max-w-xs truncate"
+                  >
+                    {filteredStudents.length === 0 ? (
+                      <option value="">No matching students</option>
+                    ) : (
+                      filteredStudents.map(s => (
+                        <option key={s.id} value={s.id}>
+                          {s.surname ? `${s.surname}, ${s.first_name}` : (s.full_name || s.email)}
+                        </option>
+                      ))
+                    )}
+                  </select>
+                </div>
+              </div>
+            )}
+
             <div className="bg-[#a3ba91] px-4 flex items-end overflow-x-auto select-none pt-1">
               <button
                 onClick={() => setActiveTab('student_info')}
@@ -890,7 +972,7 @@ export default function ClinicApp() {
                         disabled={isStaff}
                         value={studentInfo.surname}
                         onChange={e => setStudentInfo({...studentInfo, surname: e.target.value})}
-                        placeholder="e.g. Dela Cruz"
+                        placeholder="e.g. Santos"
                         className="border-b border-dotted border-slate-400 focus:border-slate-800 outline-none px-1 text-slate-700 bg-transparent min-w-[120px]"
                       />
 
@@ -899,7 +981,7 @@ export default function ClinicApp() {
                         disabled={isStaff}
                         value={studentInfo.first_name}
                         onChange={e => setStudentInfo({...studentInfo, first_name: e.target.value})}
-                        placeholder="e.g. Juan"
+                        placeholder="e.g. Maria"
                         className="border-b border-dotted border-slate-400 focus:border-slate-800 outline-none px-1 text-slate-700 bg-transparent min-w-[140px]"
                       />
 
@@ -908,7 +990,7 @@ export default function ClinicApp() {
                         disabled={isStaff}
                         value={studentInfo.middle_initial}
                         onChange={e => setStudentInfo({...studentInfo, middle_initial: e.target.value})}
-                        placeholder="-"
+                        placeholder="D."
                         className="border-b border-dotted border-slate-400 focus:border-slate-800 outline-none px-1 text-slate-700 bg-transparent w-12 text-center"
                       />
                     </div>
@@ -920,25 +1002,28 @@ export default function ClinicApp() {
                         type="text"
                         value={studentInfo.dob}
                         onChange={e => setStudentInfo({...studentInfo, dob: e.target.value})}
-                        placeholder="e.g. mm/dd/yyyy"
+                        placeholder="e.g. January 15, 2004"
                         className="border-b border-dotted border-slate-400 focus:border-slate-800 outline-none px-1 text-slate-700 bg-transparent min-w-[160px]"
                       />
 
+                      {/* 1. Sex Option changed to Male/Female dropdown */}
                       <span className="font-extrabold text-slate-900 ml-2">Sex</span>
-                      <input
+                      <select
                         disabled={isStaff}
                         value={studentInfo.sex}
                         onChange={e => setStudentInfo({...studentInfo, sex: e.target.value})}
-                        placeholder="Female"
-                        className="border-b border-dotted border-slate-400 focus:border-slate-800 outline-none px-1 text-slate-700 bg-transparent w-20"
-                      />
+                        className="border-b border-dotted border-slate-400 focus:border-slate-800 outline-none px-1 text-slate-700 bg-transparent"
+                      >
+                        <option value="Male">Male</option>
+                        <option value="Female">Female</option>
+                      </select>
 
                       <span className="font-extrabold text-slate-900 ml-2">Program & Year Level</span>
                       <input
                         disabled={isStaff}
                         value={studentInfo.program_year_level}
                         onChange={e => setStudentInfo({...studentInfo, program_year_level: e.target.value})}
-                        placeholder="BS Nursing 3rd Year"
+                        placeholder="e.g. BS Information Technology 3rd Year"
                         className="border-b border-dotted border-slate-400 focus:border-slate-800 outline-none px-1 text-slate-700 bg-transparent flex-1 min-w-[160px]"
                       />
                     </div>
@@ -949,7 +1034,7 @@ export default function ClinicApp() {
                         disabled={isStaff}
                         value={studentInfo.address}
                         onChange={e => setStudentInfo({...studentInfo, address: e.target.value})}
-                        placeholder="24 Unit 304 Allim Building, Samat Cor Banawe, Brgy Sto. Domingo, Quezon City"
+                        placeholder="e.g. 123 University Avenue, Metro Manila"
                         className="border-b border-dotted border-slate-400 focus:border-slate-800 outline-none px-1 text-slate-700 bg-transparent flex-1 min-w-[320px]"
                       />
                     </div>
@@ -960,15 +1045,18 @@ export default function ClinicApp() {
                         disabled={isStaff}
                         value={studentInfo.contact_number}
                         onChange={e => setStudentInfo({...studentInfo, contact_number: e.target.value})}
-                        placeholder="+63 912 345 6789"
+                        placeholder="e.g. 0912 345 6789"
                         className="border-b border-dotted border-slate-400 focus:border-slate-800 outline-none px-1 text-slate-700 bg-transparent min-w-[140px]"
                       />
 
+                      {/* 2. Email is now changeable */}
                       <span className="font-extrabold text-slate-900 ml-2">Email Address</span>
                       <input
-                        disabled
+                        disabled={isStaff}
                         value={studentInfo.email}
-                        className="border-b border-dotted border-slate-400 px-1 text-slate-700 bg-transparent flex-1 min-w-[200px]"
+                        onChange={e => setStudentInfo({...studentInfo, email: e.target.value})}
+                        placeholder="e.g. student@university.edu"
+                        className="border-b border-dotted border-slate-400 focus:border-slate-800 outline-none px-1 text-slate-700 bg-transparent flex-1 min-w-[200px]"
                       />
                     </div>
 
@@ -978,7 +1066,7 @@ export default function ClinicApp() {
                         disabled={isStaff}
                         value={studentInfo.preferred_hospital}
                         onChange={e => setStudentInfo({...studentInfo, preferred_hospital: e.target.value})}
-                        placeholder="St. Luke's Medical Center"
+                        placeholder="e.g. University General Hospital"
                         className="border-b border-dotted border-slate-400 focus:border-slate-800 outline-none px-1 text-slate-700 bg-transparent flex-1 min-w-[200px]"
                       />
                     </div>
@@ -995,7 +1083,7 @@ export default function ClinicApp() {
                             disabled={isStaff}
                             value={studentInfo.emergency_name}
                             onChange={e => setStudentInfo({...studentInfo, emergency_name: e.target.value})}
-                            placeholder="Juan Dela Cruz"
+                            placeholder="e.g. Jane Santos"
                             className="border-b border-dotted border-slate-400 focus:border-slate-800 outline-none px-1 text-slate-700 bg-transparent flex-1"
                           />
                         </div>
@@ -1006,7 +1094,7 @@ export default function ClinicApp() {
                             disabled={isStaff}
                             value={studentInfo.emergency_contact}
                             onChange={e => setStudentInfo({...studentInfo, emergency_contact: e.target.value})}
-                            placeholder="+63 912 345 6789"
+                            placeholder="e.g. 0918 765 4321"
                             className="border-b border-dotted border-slate-400 focus:border-slate-800 outline-none px-1 text-slate-700 bg-transparent min-w-[140px]"
                           />
 
@@ -1015,7 +1103,7 @@ export default function ClinicApp() {
                             disabled={isStaff}
                             value={studentInfo.emergency_email}
                             onChange={e => setStudentInfo({...studentInfo, emergency_email: e.target.value})}
-                            placeholder="juan.dela.cruz@edu.ph"
+                            placeholder="e.g. guardian@example.com"
                             className="border-b border-dotted border-slate-400 focus:border-slate-800 outline-none px-1 text-slate-700 bg-transparent flex-1"
                           />
                         </div>
@@ -1026,8 +1114,8 @@ export default function ClinicApp() {
                             disabled={isStaff}
                             value={studentInfo.emergency_relation}
                             onChange={e => setStudentInfo({...studentInfo, emergency_relation: e.target.value})}
-                            placeholder="Parent"
-                            className="border-b border-dotted border-slate-400 focus:border-slate-800 outline-none px-1 text-slate-700 bg-transparent w-40"
+                            placeholder="e.g. Parent / Legal Guardian"
+                            className="border-b border-dotted border-slate-400 focus:border-slate-800 outline-none px-1 text-slate-700 bg-transparent w-56"
                           />
                         </div>
                       </div>
@@ -1056,7 +1144,7 @@ export default function ClinicApp() {
                             disabled={isStaff}
                             value={studentInfo.family_history}
                             onChange={e => setStudentInfo({...studentInfo, family_history: e.target.value})}
-                            placeholder="Asthma, Diabetes"
+                            placeholder="e.g. Hypertension (Paternal), Asthma (Maternal)"
                             className="border-b border-dotted border-slate-400 focus:border-slate-800 outline-none px-1 text-slate-700 bg-transparent flex-1"
                           />
                         </div>
@@ -1218,63 +1306,120 @@ export default function ClinicApp() {
                     </div>
                   )}
 
+                  {/* Physical Assessment with (+) Dated Multiple Entries */}
                   {assessmentSubTab === 'physical_assessment' && (
-                    <div className="max-w-2xl space-y-6 pt-2">
-                      <h2 className="text-xl font-black tracking-tight text-slate-900 uppercase mb-4">
-                        VITAL SIGNS ASSESSMENT
-                      </h2>
-
-                      <div className="grid grid-cols-2 gap-4 text-sm">
-                        <div>
-                          <label className="text-xs font-bold text-slate-700 block mb-1">Blood Pressure</label>
-                          <input
-                            disabled={!isStaff}
-                            value={assessment.blood_pressure || ''}
-                            onChange={e => setAssessment({...assessment, blood_pressure: e.target.value})}
-                            className="w-full border p-2 rounded disabled:bg-slate-50 text-sm"
-                            placeholder="120/80 mmHg"
-                          />
-                        </div>
-                        <div>
-                          <label className="text-xs font-bold text-slate-700 block mb-1">Heart Rate</label>
-                          <input
-                            disabled={!isStaff}
-                            value={assessment.heart_rate || ''}
-                            onChange={e => setAssessment({...assessment, heart_rate: e.target.value})}
-                            className="w-full border p-2 rounded disabled:bg-slate-50 text-sm"
-                            placeholder="72 bpm"
-                          />
-                        </div>
-                        <div>
-                          <label className="text-xs font-bold text-slate-700 block mb-1">Respiratory Rate</label>
-                          <input
-                            disabled={!isStaff}
-                            value={assessment.respiratory_rate || ''}
-                            onChange={e => setAssessment({...assessment, respiratory_rate: e.target.value})}
-                            className="w-full border p-2 rounded disabled:bg-slate-50 text-sm"
-                            placeholder="18 cpm"
-                          />
-                        </div>
-                        <div>
-                          <label className="text-xs font-bold text-slate-700 block mb-1">Oxygen Saturation</label>
-                          <input
-                            disabled={!isStaff}
-                            value={assessment.oxygen_saturation || ''}
-                            onChange={e => setAssessment({...assessment, oxygen_saturation: e.target.value})}
-                            className="w-full border p-2 rounded disabled:bg-slate-50 text-sm"
-                            placeholder="98%"
-                          />
-                        </div>
+                    <div className="space-y-6 pt-2">
+                      <div className="flex justify-between items-center border-b pb-3">
+                        <h2 className="text-xl font-black tracking-tight text-slate-900 uppercase">
+                          VITAL SIGNS ASSESSMENT HISTORY
+                        </h2>
+                        {isStaff && (
+                          <button
+                            onClick={() => setShowNewVitalsForm(!showNewVitalsForm)}
+                            className="bg-[#1c3822] hover:bg-[#14291a] text-white text-xs font-bold uppercase px-3 py-1.5 rounded flex items-center gap-1 shadow-xs transition"
+                          >
+                            <span>{showNewVitalsForm ? '✕ Close Form' : '+ Add Assessment Entry'}</span>
+                          </button>
+                        )}
                       </div>
 
-                      {isStaff && (
-                        <button
-                          onClick={handleSaveVitals}
-                          className="bg-[#1c3822] hover:bg-[#14291a] text-white px-5 py-2 text-xs font-bold uppercase tracking-wider rounded shadow-xs"
-                        >
-                          Save Vital Signs
-                        </button>
+                      {/* Doctor Entry Form */}
+                      {isStaff && showNewVitalsForm && (
+                        <div className="bg-slate-50 border border-slate-300 p-5 rounded-lg space-y-4 max-w-2xl animate-in fade-in duration-150">
+                          <h3 className="text-xs font-bold text-slate-700 uppercase">New Vital Signs Record</h3>
+                          
+                          <div>
+                            <label className="text-xs font-semibold text-slate-700 block mb-1">Date of Assessment</label>
+                            <input
+                              type="date"
+                              value={newVital.date_recorded}
+                              onChange={e => setNewVital({...newVital, date_recorded: e.target.value})}
+                              className="border p-2 rounded w-full bg-white text-sm"
+                            />
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-4 text-sm">
+                            <div>
+                              <label className="text-xs font-semibold text-slate-700 block mb-1">Blood Pressure</label>
+                              <input
+                                value={newVital.blood_pressure}
+                                onChange={e => setNewVital({...newVital, blood_pressure: e.target.value})}
+                                placeholder="e.g. 120/80 mmHg"
+                                className="w-full border p-2 rounded bg-white text-sm"
+                              />
+                            </div>
+                            <div>
+                              <label className="text-xs font-semibold text-slate-700 block mb-1">Heart Rate</label>
+                              <input
+                                value={newVital.heart_rate}
+                                onChange={e => setNewVital({...newVital, heart_rate: e.target.value})}
+                                placeholder="e.g. 72 bpm"
+                                className="w-full border p-2 rounded bg-white text-sm"
+                              />
+                            </div>
+                            <div>
+                              <label className="text-xs font-semibold text-slate-700 block mb-1">Respiratory Rate</label>
+                              <input
+                                value={newVital.respiratory_rate}
+                                onChange={e => setNewVital({...newVital, respiratory_rate: e.target.value})}
+                                placeholder="e.g. 18 cpm"
+                                className="w-full border p-2 rounded bg-white text-sm"
+                              />
+                            </div>
+                            <div>
+                              <label className="text-xs font-semibold text-slate-700 block mb-1">Oxygen Saturation</label>
+                              <input
+                                value={newVital.oxygen_saturation}
+                                onChange={e => setNewVital({...newVital, oxygen_saturation: e.target.value})}
+                                placeholder="e.g. 98%"
+                                className="w-full border p-2 rounded bg-white text-sm"
+                              />
+                            </div>
+                          </div>
+
+                          <button
+                            onClick={handleSaveNewVitals}
+                            className="bg-[#1c3822] hover:bg-[#14291a] text-white px-5 py-2 text-xs font-bold uppercase tracking-wider rounded shadow-xs"
+                          >
+                            Save Vital Signs Record
+                          </button>
+                        </div>
                       )}
+
+                      {/* Display Multiple Dated Vital Records */}
+                      <div className="space-y-3">
+                        {vitalsList.length === 0 ? (
+                          <p className="text-sm text-slate-400 italic">No vital sign assessments recorded yet.</p>
+                        ) : (
+                          vitalsList.map(v => (
+                            <div key={v.id} className="border border-slate-200 rounded-lg p-4 bg-slate-50 shadow-2xs">
+                              <div className="flex justify-between items-center border-b pb-2 mb-3">
+                                <span className="font-bold text-xs uppercase text-[#1c3822]">
+                                  📅 Date: {v.date_recorded}
+                                </span>
+                              </div>
+                              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-xs">
+                                <div>
+                                  <span className="text-slate-500 font-semibold block">Blood Pressure:</span>
+                                  <span className="font-bold text-slate-800 text-sm">{v.blood_pressure || '—'}</span>
+                                </div>
+                                <div>
+                                  <span className="text-slate-500 font-semibold block">Heart Rate:</span>
+                                  <span className="font-bold text-slate-800 text-sm">{v.heart_rate || '—'}</span>
+                                </div>
+                                <div>
+                                  <span className="text-slate-500 font-semibold block">Respiratory Rate:</span>
+                                  <span className="font-bold text-slate-800 text-sm">{v.respiratory_rate || '—'}</span>
+                                </div>
+                                <div>
+                                  <span className="text-slate-500 font-semibold block">Oxygen Saturation:</span>
+                                  <span className="font-bold text-slate-800 text-sm">{v.oxygen_saturation || '—'}</span>
+                                </div>
+                              </div>
+                            </div>
+                          ))
+                        )}
+                      </div>
                     </div>
                   )}
 
@@ -1415,7 +1560,6 @@ export default function ClinicApp() {
                   </div>
                 </div>
               )}
-
             </div>
           </div>
         )}
@@ -1424,7 +1568,7 @@ export default function ClinicApp() {
         {mainPage === 'scheduling' && (
           <div className="p-8 md:p-14 bg-white min-h-[580px]">
             {isStaff ? (
-              /* DOCTOR / ADMIN VIEW: PERSISTENT APPOINTMENT MANAGEMENT TABLE */
+              /* DOCTOR / ADMIN VIEW: RESCHEDULE & MANAGE APPOINTMENTS */
               <div className="space-y-6">
                 <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-200 pb-4">
                   <div>
@@ -1432,7 +1576,7 @@ export default function ClinicApp() {
                       SCHEDULED CLINIC APPOINTMENTS
                     </h2>
                     <p className="text-xs text-slate-500 mt-1">
-                      Manage and verify incoming student bookings and procedure schedules.
+                      Manage, confirm, or move/reschedule student bookings.
                     </p>
                   </div>
 
@@ -1480,6 +1624,11 @@ export default function ClinicApp() {
                             <td className="py-3 px-4">
                               <div className="font-bold text-slate-900">{appt.date}</div>
                               <div className="text-[11px] text-slate-500 font-medium">{appt.time}</div>
+                              {appt.rescheduled && (
+                                <span className="text-[9px] font-bold text-amber-700 uppercase bg-amber-50 px-1 rounded border border-amber-200">
+                                  Rescheduled
+                                </span>
+                              )}
                             </td>
                             <td className="py-3 px-4">
                               <span className={`text-[10px] font-bold px-2.5 py-1 rounded-full uppercase inline-block ${
@@ -1492,7 +1641,19 @@ export default function ClinicApp() {
                                 {appt.status}
                               </span>
                             </td>
-                            <td className="py-3 px-4 text-right space-x-2">
+                            <td className="py-3 px-4 text-right space-x-1.5">
+                              {/* Move / Reschedule Button for Doctors */}
+                              <button
+                                onClick={() => {
+                                  setReschedulingAppt(appt);
+                                  setNewRescheduleDate(appt.date);
+                                  setNewRescheduleTime(appt.time || '09:00 AM');
+                                }}
+                                className="bg-amber-600 hover:bg-amber-700 text-white font-bold text-[11px] px-2.5 py-1 rounded transition"
+                              >
+                                Move / Reschedule
+                              </button>
+
                               {appt.status !== 'Confirmed' && (
                                 <button
                                   onClick={() => handleUpdateStatus(appt.id, 'Confirmed')}
@@ -1524,16 +1685,76 @@ export default function ClinicApp() {
                     </tbody>
                   </table>
                 </div>
+
+                {/* Reschedule Modal */}
+                {reschedulingAppt && (
+                  <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-[2px] p-4">
+                    <div className="bg-white rounded-xl shadow-2xl border border-slate-300 w-full max-w-sm overflow-hidden p-6 space-y-4">
+                      <h3 className="text-base font-bold text-[#1c3822] uppercase">
+                        Move Appointment
+                      </h3>
+                      <p className="text-xs text-slate-600">
+                        Patient: <b>{reschedulingAppt.student_name}</b> ({reschedulingAppt.detail})
+                      </p>
+
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-700 mb-1">New Available Date</label>
+                        <input
+                          type="date"
+                          min={getMinBookingDate()}
+                          value={newRescheduleDate}
+                          onChange={e => setNewRescheduleDate(e.target.value)}
+                          className="w-full border border-slate-300 p-2 text-xs rounded"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-700 mb-1">New Available Time Slot</label>
+                        <select
+                          value={newRescheduleTime}
+                          onChange={e => setNewRescheduleTime(e.target.value)}
+                          className="w-full border border-slate-300 p-2 text-xs rounded bg-white"
+                        >
+                          <option>08:30 AM</option>
+                          <option>09:00 AM</option>
+                          <option>10:00 AM</option>
+                          <option>11:00 AM</option>
+                          <option>01:30 PM</option>
+                          <option>02:30 PM</option>
+                          <option>03:30 PM</option>
+                        </select>
+                      </div>
+
+                      <div className="flex gap-2 pt-2">
+                        <button
+                          type="button"
+                          onClick={() => setReschedulingAppt(null)}
+                          className="w-1/2 bg-gray-200 text-slate-700 font-bold text-xs py-2 rounded uppercase"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleConfirmReschedule}
+                          className="w-1/2 bg-[#1b3824] hover:bg-[#14291a] text-white font-bold text-xs py-2 rounded uppercase"
+                        >
+                          Confirm Move
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
             ) : (
-              /* STUDENT VIEW: BOOKING CARD + PERSISTENT VIEW MODAL BUTTON */
+              /* STUDENT VIEW: STEP-BY-STEP BOOKING WITH VERIFICATION */
               <div className="flex flex-col items-center justify-start">
-                <div className="w-full max-w-[360px] bg-[#fff6f4] border border-black px-7 py-8 shadow-md">
-                  <h2 className="text-center text-3xl font-extrabold tracking-wider text-black font-sans uppercase mb-8 select-none">
+                <div className="w-full max-w-[380px] bg-[#fff6f4] border border-black px-7 py-8 shadow-md">
+                  <h2 className="text-center text-3xl font-extrabold tracking-wider text-black font-sans uppercase mb-6 select-none">
                     BOOK APPOINTMENT
                   </h2>
 
-                  {scheduleStep === 'select' ? (
+                  {/* Step 1: Select Type */}
+                  {scheduleStep === 'select' && (
                     <div className="space-y-6">
                       <div>
                         <label className="block text-xs font-bold text-slate-800 mb-1.5">
@@ -1589,19 +1810,23 @@ export default function ClinicApp() {
                         </button>
                       </div>
                     </div>
-                  ) : (
-                    <form onSubmit={handleFinalizeBooking} className="space-y-5">
+                  )}
+
+                  {/* Step 2: Date & Time Picker */}
+                  {scheduleStep === 'datetime' && (
+                    <div className="space-y-5">
                       <div className="text-xs bg-emerald-50 border border-emerald-200 text-emerald-900 p-2.5 rounded font-medium">
                         Selected: <b>{appointmentType}</b> — {appointmentType === 'Consultation' ? specialization : procedureType}
                       </div>
 
                       <div>
                         <label className="block text-xs font-bold text-slate-800 mb-1">
-                          Preferred Date
+                          Available Date (Clinic Days: Mon - Fri)
                         </label>
                         <input
                           type="date"
                           required
+                          min={getMinBookingDate()}
                           value={appointmentDate}
                           onChange={e => setAppointmentDate(e.target.value)}
                           className="w-full border border-slate-300 bg-white text-xs p-2 rounded"
@@ -1610,7 +1835,7 @@ export default function ClinicApp() {
 
                       <div>
                         <label className="block text-xs font-bold text-slate-800 mb-1">
-                          Preferred Time Slot
+                          Available Clinic Time Slot
                         </label>
                         <select
                           value={appointmentTime}
@@ -1636,14 +1861,52 @@ export default function ClinicApp() {
                           Back
                         </button>
                         <button
-                          type="submit"
-                          disabled={loading}
+                          type="button"
+                          onClick={() => setScheduleStep('verify')}
                           className="w-2/3 bg-[#1b3824] hover:bg-[#14291a] text-white font-bold tracking-widest text-xs py-2.5 rounded uppercase shadow-sm transition"
                         >
-                          {loading ? 'SAVING...' : 'CONFIRM'}
+                          REVIEW
                         </button>
                       </div>
-                    </form>
+                    </div>
+                  )}
+
+                  {/* Step 3: Appointment Verification Screen */}
+                  {scheduleStep === 'verify' && (
+                    <div className="space-y-5">
+                      <div className="border border-[#1c3822] bg-white p-4 rounded space-y-2.5 text-xs text-slate-800">
+                        <h3 className="font-extrabold uppercase text-[#1c3822] border-b pb-1">
+                          Appointment Verification
+                        </h3>
+                        <p><b>Student:</b> {studentInfo.full_name || currentUser.email}</p>
+                        <p><b>Category:</b> {appointmentType}</p>
+                        <p><b>Service:</b> {appointmentType === 'Consultation' ? specialization : procedureType}</p>
+                        <p><b>Scheduled Date:</b> {appointmentDate}</p>
+                        <p><b>Scheduled Time:</b> {appointmentTime}</p>
+                      </div>
+
+                      <p className="text-[11px] text-slate-500 italic text-center">
+                        Please review carefully before confirming your clinic booking.
+                      </p>
+
+                      <div className="flex gap-2 pt-2">
+                        <button
+                          type="button"
+                          onClick={() => setScheduleStep('datetime')}
+                          className="w-1/3 bg-gray-200 hover:bg-gray-300 text-slate-700 font-bold text-xs py-2.5 rounded uppercase transition"
+                        >
+                          Edit
+                        </button>
+                        <button
+                          type="button"
+                          disabled={loading}
+                          onClick={handleFinalizeBooking}
+                          className="w-2/3 bg-emerald-800 hover:bg-emerald-900 text-white font-bold tracking-widest text-xs py-2.5 rounded uppercase shadow-sm transition"
+                        >
+                          {loading ? 'SAVING...' : 'VERIFY & CONFIRM'}
+                        </button>
+                      </div>
+                    </div>
                   )}
                 </div>
 
@@ -1660,6 +1923,7 @@ export default function ClinicApp() {
                   </button>
                 </div>
 
+                {/* Scheduled Appointments Modal */}
                 {showAppointmentsModal && (
                   <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-[2px] p-4">
                     <div className="bg-white rounded-xl shadow-2xl border border-slate-300 w-full max-w-lg overflow-hidden animate-in fade-in zoom-in-95 duration-150">
@@ -1700,6 +1964,11 @@ export default function ClinicApp() {
                                 <p className="text-slate-500 mt-1 font-medium">
                                   📅 <b>{appt.date}</b> at <b>{appt.time}</b>
                                 </p>
+                                {appt.rescheduled && (
+                                  <p className="text-[10px] text-amber-800 font-bold mt-0.5">
+                                    ⚠️ Moved/Rescheduled by Clinic Doctor
+                                  </p>
+                                )}
                               </div>
 
                               <button
