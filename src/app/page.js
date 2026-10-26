@@ -245,6 +245,31 @@ export default function ClinicApp() {
     loadStudentData(id, chosen?.email);
   };
 
+  // Filtered students for patient search
+  const filteredStudents = allStudents.filter(s => {
+    const q = studentSearchTerm.toLowerCase();
+    const fullName = (s.full_name || '').toLowerCase();
+    const surname = (s.surname || '').toLowerCase();
+    const firstName = (s.first_name || '').toLowerCase();
+    const email = (s.email || '').toLowerCase();
+    return fullName.includes(q) || surname.includes(q) || firstName.includes(q) || email.includes(q);
+  });
+
+  // Handle Search Input Enter Key
+  const handleSearchKeyDown = (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      if (filteredStudents.length > 0) {
+        const topMatch = filteredStudents[0];
+        handleSelectStudent(topMatch.id);
+        setActiveTab('student_info'); // Jump straight to student information tab
+        e.target.blur(); // Remove focus
+      } else {
+        alert('No matching student found.');
+      }
+    }
+  };
+
   const handleAuth = async (e) => {
     e.preventDefault();
     setAuthMessage('');
@@ -266,7 +291,6 @@ export default function ClinicApp() {
     }
 
     if (authView === 'register') {
-      // Direct student registration only
       const { data, error } = await supabase.auth.signUp({
         email: formattedEmail,
         password: authPassword,
@@ -377,7 +401,6 @@ export default function ClinicApp() {
     else alert('Student Information saved successfully!');
   };
 
-  // Save New Vital Sign Record with Date
   const handleSaveNewVitals = async () => {
     if (!selectedStudentId) return alert('Select a student first.');
     if (!newVital.date_recorded) return alert('Please specify a date.');
@@ -440,7 +463,6 @@ export default function ClinicApp() {
     }
   };
 
-  // Database-backed Appointment Booking
   const handleFinalizeBooking = async () => {
     const detail = appointmentType === 'Consultation' ? specialization : procedureType;
     const currentName = studentInfo.surname 
@@ -477,7 +499,6 @@ export default function ClinicApp() {
     }
   };
 
-  // Doctor reschedule confirmation
   const handleConfirmReschedule = async () => {
     if (!reschedulingAppt || !newRescheduleDate || !newRescheduleTime) return;
 
@@ -553,17 +574,6 @@ export default function ClinicApp() {
   const pendingLabs = LAB_KEYS.filter(lab => !assessment[lab.key]);
   const isStaff = userRole === 'doctor' || userRole === 'admin';
 
-  // Filtered students for patient search
-  const filteredStudents = allStudents.filter(s => {
-    const q = studentSearchTerm.toLowerCase();
-    const fullName = (s.full_name || '').toLowerCase();
-    const surname = (s.surname || '').toLowerCase();
-    const firstName = (s.first_name || '').toLowerCase();
-    const email = (s.email || '').toLowerCase();
-    return fullName.includes(q) || surname.includes(q) || firstName.includes(q) || email.includes(q);
-  });
-
-  // Calculate available booking dates: Weekdays only, starting from tomorrow
   const getMinBookingDate = () => {
     const d = new Date();
     d.setDate(d.getDate() + 1);
@@ -854,7 +864,8 @@ export default function ClinicApp() {
                     type="text"
                     value={studentSearchTerm}
                     onChange={e => setStudentSearchTerm(e.target.value)}
-                    placeholder="Search by student name or email..."
+                    onKeyDown={handleSearchKeyDown}
+                    placeholder="Type name/email & press Enter..."
                     className="flex-1 text-xs border border-slate-300 bg-white px-3 py-1.5 rounded focus:outline-none focus:ring-1 focus:ring-[#1c3822]"
                   />
                 </div>
@@ -1006,7 +1017,6 @@ export default function ClinicApp() {
                         className="border-b border-dotted border-slate-400 focus:border-slate-800 outline-none px-1 text-slate-700 bg-transparent min-w-[160px]"
                       />
 
-                      {/* 1. Sex Option changed to Male/Female dropdown */}
                       <span className="font-extrabold text-slate-900 ml-2">Sex</span>
                       <select
                         disabled={isStaff}
@@ -1049,7 +1059,6 @@ export default function ClinicApp() {
                         className="border-b border-dotted border-slate-400 focus:border-slate-800 outline-none px-1 text-slate-700 bg-transparent min-w-[140px]"
                       />
 
-                      {/* 2. Email is now changeable */}
                       <span className="font-extrabold text-slate-900 ml-2">Email Address</span>
                       <input
                         disabled={isStaff}
@@ -1642,7 +1651,6 @@ export default function ClinicApp() {
                               </span>
                             </td>
                             <td className="py-3 px-4 text-right space-x-1.5">
-                              {/* Move / Reschedule Button for Doctors */}
                               <button
                                 onClick={() => {
                                   setReschedulingAppt(appt);
